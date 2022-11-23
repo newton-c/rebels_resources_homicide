@@ -1,252 +1,78 @@
-library(MASS)
+library(lmtest)
 library(MatchIt)
-library(modelsummary)
+library(purrr)
 library(tidyverse)
+library(sandwich)
+library(Zelig)
+library(patchwork)
 
-library(DMwR)
+theme_set(theme_bw)
 
-select <- dplyr::select # both dplyr and MASS have select, I want to use dplyr
+datasets <- list()
 
-load(file = "data/data25Mar2020.Rdata")
+datasets <- map(seq_len(5), function(i) {
+    file_path <- paste0("data/imputed_data_", i, ".csv")
+    datasets[[i]] <- read_csv(file_path)
+})
 
-matching_data <- dat %>% 
-    filter(year > last_year_conflict & !is.na(illicit_resources)) %>% 
-    mutate(time = year - last_year_conflict,
-           time2 = time**2,
-           time3 = time**3) %>% 
-    select(year, gwno_a, conflict_id, hom_rate, hom_count, rgdppc, polity2, total_violence, pop,
-           illicit_resources, rpe_gdp, time, time2, time3, side_a 
-           ) %>% 
-    replace_na(list(total_violence = 0)) %>% 
+datasets[[6]] <- read_csv("data/unimputed_data.csv") %>%
     drop_na()
 
+match_formula <- illicit_resources ~ pop_slums + gini + corruption +
+                 pko_troops + pko_police + total_deaths
 
-ggplot() + 
-    geom_density(data = matching_data, aes(hom_rate), fill = 'red') + 
-    theme_bw()
-ggplot() + 
-    geom_density(data = matching_data, aes(hom_count), fill = 'red') +
-    theme_bw()
-#matching_data <- as.data.frame(matching_data)
-#knn_impute <- knnImputation(data = matching_data, k = 15, scale = F, meth = "weighAve")
+match_algos <- list("genetic", "cem", "nearest", "optimal")
 
-ggplot(matching_data, aes(x = as.factor(illicit_resources), y = hom_count)) + 
-    geom_boxplot() +
-    theme_classic()
-
-
-matching_data <- dat %>% drop_na()
-cem_data <- matchit(illicit_resources ~ total_violence + rpe_gdp +
-                        pop + polity2 + rgdppc, data = a.out$imputations$imp1,
-                    method = 'cem')
-
-summary(cem_data)
-#plot(cem_data)
-
-cem_data <- match.data(cem_data)
-
-genetic_data <- matchit(illicit_resources ~ total_violence + year + rpe_gdp +
-                            pop + polity2 + rgdppc, data = matching_data,
-                        method = 'genetic')
-
-summary(genetic_data)
-#plot(genetic_data)
+matched_data <- list()
+for (k in seq_len(24)) {
+for (i in seq_along(datasets)) {
+    for (j in seq_along(match_algos)) {
+    matched <- matchit(formula = match_formula, data = datasets[[i]],
+                                 method = match_algos[[j]], replace = TRUE)
+        }
+    matched_data[[k]] <- matched
+    }
+}
 
 
-genetic_data <- match.data(genetic_data)
+# vignette("estimating-effects")
+gens <- array(NA, c(6, 2))
+for (i in seq_len(6)) {
+    dat <- match.data(matched_data[[i]])
+    gen <- zelig(hom_count ~ illicit_resources, data = dat,
+                 weights = dat$weights, model = "negbin", cite = FALSE) %>%
+           from_zelig_model()
+    gens[i, 1] <- coeftest(gen, vcov. = vcovHC)[[2]]
+    gens[i, 2] <- coeftest(gen, vcov. = vcovHC)[[4]]
+}
 
-models <- list(`CEM Homicide Rate` = lm(hom_rate ~ illicit_resources, 
-                                        data = cem_data, weights = weights),
-               `CEM Homicide Count` = glm.nb(hom_count ~ illicit_resources, 
-                                             data = cem_data, weights = weights),
-               `Genetic Homicide Rate` = lm(hom_rate ~ illicit_resources, 
-                                        data = genetic_data, weights = weights),
-               `Genetic Homicide Count` = glm.nb(hom_count ~ illicit_resources, 
-                                             data = genetic_data, weights = weights)
-               )
-modelsummary(models = models, stars = TRUE)
-modelplot(models = models, coef_omit = 'Int') +
-    geom_vline(xintercept = 0)
+gen_p <- ggplot() +
+    geom_point(aes(x = seq_len(6), y = gens[, 1])) +
+    geom_segment(aes(x = seq_len(6), xend = seq_len(6),
+                     y = gens[, 1] - 1.96 * gens[, 2],
+                     yend = gens[, 1] + 1.96 * gens[, 2])) +
+    geom_hline(aes(yintercept = 0), linetype = 2) +
+    xlab("Amelia II Dataset #") +
+    ylab("Treatment Effect") +
+    labs(title = "Genetic Matching")
 
-matching_data$polity2_sqrd <- matching_data$polity2 ^ 2
+cems <- array(NA, c(6, 2))
+for (i in seq_len(6)) {
+    j <- i + 5
+    dat <- match.data(matched_data[[j]])
+    cem <- zelig(hom_count ~ illicit_resources, data = dat,
+                 weights = dat$weights, model = "negbin", cite = FALSE) %>%
+           from_zelig_model()
+    cems[i, 1] <- coeftest(cem, vcov. = vcovHC)[[2]]
+    cems[i, 2] <- coeftest(cem, vcov. = vcovHC)[[4]]
+}
 
-models <- list(`Homicide Count` = glm.nb(hom_count ~ illicit_resources + 
-                                              total_violence + pop + rpe_gdp +
-                                              polity2 + 
-                                              time, data = matching_data),
-               `Homicide Count` = glm.nb(hom_count ~ illicit_resources + 
-                                                total_violence + pop + rpe_gdp +
-                                                polity2 + 
-                                                time + time2 + time3,
-                                            data = matching_data),
-               `Homicide Count` = glm.nb(hom_count ~ illicit_resources + 
-                                                total_violence + rpe_gdp +
-                                                polity2 + 
-                                            as.factor(gwno_a) + as.factor(year), data = matching_data),
-               `Homicide Rate` = lm(hom_rate ~ illicit_resources + 
-                                                total_violence  + rpe_gdp +
-                                                polity2 + 
-                                            as.factor(gwno_a) + as.factor(year),
-                                        data = matching_data)
-)
-
-cn = c(
-       'illicit_resources' = 'Illicit Funding',
-       'total_violence' = 'Total Violence',
-       'pop' = 'Population',
-       'rpe_gdp' = 'Relative Political Extraction',
-       'polity2' = 'Polity', 
-       'time' = 'Time',
-       'time2' = 'Time^2', 
-       'time3' = 'Time^3',
-       '(Intercept)' = 'Constant')
-
-modelsummary(models = models, stars = TRUE, coef_omit = 'year|gwno', 
-             coef_map = cn, vcov = 'robust')
-modelplot(models = models, coef_omit = 'year|Int') +
-    geom_vline(xintercept = 0)
-
-
-# CEM imputed models
-cem_data1 <- matchit(illicit_resources ~ total_violence + rpe_gdp +
-                         pop + polity2 + rgdppc, data = a.out$imputations$imp1,
-                     method = 'cem')
-cem_data2 <- matchit(illicit_resources ~ total_violence + rpe_gdp +
-                         pop + polity2 + rgdppc, data = a.out$imputations$imp2,
-                     method = 'cem')
-cem_data3 <- matchit(illicit_resources ~ total_violence + rpe_gdp +
-                         pop + polity2 + rgdppc, data = a.out$imputations$imp3,
-                     method = 'cem')
-cem_data4 <- matchit(illicit_resources ~ total_violence + rpe_gdp +
-                         pop + polity2 + rgdppc, data = a.out$imputations$imp4,
-                     method = 'cem')
-cem_data5 <- matchit(illicit_resources ~ total_violence + rpe_gdp +
-                         pop + polity2 + rgdppc, data = a.out$imputations$imp5,
-                     method = 'cem')
-
-models = list(
-    `Amelia 1` = zelig(hom_count ~ illicit_resources, 
-                       data = match.data(cem_data1), model = 'negbin', 
-                       cite = FALSE) %>% 
-        from_zelig_model(),
-    `Amelia 2` = zelig(hom_count ~ illicit_resources, 
-                       data = match.data(cem_data2), model = 'negbin', 
-                       cite = FALSE) %>% 
-        from_zelig_model(),
-    `Amelia 3` = zelig(hom_count ~ illicit_resources, 
-                       data = match.data(cem_data3), model = 'negbin', 
-                       cite = FALSE) %>% 
-        from_zelig_model(),
-    `Amelia 4` = zelig(hom_count ~ illicit_resources, 
-                       data = match.data(cem_data4), model = 'negbin', 
-                       cite = FALSE) %>% 
-        from_zelig_model(),
-    `Amelia 5` = zelig(hom_count ~ illicit_resources, 
-                       data = match.data(cem_data5), model = 'negbin', 
-                       cite = FALSE) %>% 
-        from_zelig_model()
-    
-)
-modelplot(models = models, coef_omit = 'Int') + 
-    geom_vline(xintercept = 0) +
-    labs(title = "CEM")
-
-# Genetic imputed data
-models = list(
-    `Amelia 1` = zelig(hom_rate ~ illicit_resources, 
-                       data = match.data(gen_data1), model = 'negbin', 
-                       cite = FALSE) %>% 
-        from_zelig_model(),
-    `Amelia 2` = zelig(hom_rate ~ illicit_resources, 
-                       data = match.data(gen_data2), model = 'negbin', 
-                       cite = FALSE) %>% 
-        from_zelig_model(),
-    `Amelia 3` = zelig(hom_rate ~ illicit_resources, 
-                       data = match.data(gen_data3), model = 'negbin', 
-                       cite = FALSE) %>% 
-        from_zelig_model(),
-    `Amelia 4` = zelig(hom_rate ~ illicit_resources, 
-                       data = match.data(gen_data4), model = 'negbin', 
-                       cite = FALSE) %>% 
-        from_zelig_model(),
-    `Amelia 5` = zelig(hom_rate ~ illicit_resources, 
-                       data = match.data(gen_data5), model = 'negbin', 
-                       cite = FALSE) %>% 
-        from_zelig_model()
-    
-)
-modelplot(models = models, coef_omit = 'Int') + 
-    geom_vline(xintercept = 0) +
-    labs(title = "Genetic")
-
-# CEM imputed models (rate)
-models = list(
-    `Amelia 1` = zelig(hom_rate ~ illicit_resources, 
-                       data = match.data(cem_data1), model = 'negbin', 
-                       cite = FALSE) %>% 
-        from_zelig_model(),
-    `Amelia 2` = zelig(hom_rate ~ illicit_resources, 
-                       data = match.data(cem_data2), model = 'negbin', 
-                       cite = FALSE) %>% 
-        from_zelig_model(),
-    `Amelia 3` = zelig(hom_rate ~ illicit_resources, 
-                       data = match.data(cem_data3), model = 'negbin', 
-                       cite = FALSE) %>% 
-        from_zelig_model(),
-    `Amelia 4` = zelig(hom_rate ~ illicit_resources, 
-                       data = match.data(cem_data4), model = 'negbin', 
-                       cite = FALSE) %>% 
-        from_zelig_model(),
-    `Amelia 5` = zelig(hom_rate ~ illicit_resources, 
-                       data = match.data(cem_data5), model = 'negbin', 
-                       cite = FALSE) %>% 
-        from_zelig_model()
-    
-)
-modelplot(models = models, coef_omit = 'Int') + 
-    geom_vline(xintercept = 0) +
-    labs(title = "CEM")
-
-# Genetic imputed data (rate)
-gen_data1 <- matchit(illicit_resources ~ total_violence + rpe_gdp +
-                         pop + polity2 + rgdppc, data = a.out$imputations$imp1,
-                     method = 'genetic')
-gen_data2 <- matchit(illicit_resources ~ total_violence + rpe_gdp +
-                         pop + polity2 + rgdppc, data = a.out$imputations$imp2,
-                     method = 'genetic')
-gen_data3 <- matchit(illicit_resources ~ total_violence + rpe_gdp +
-                         pop + polity2 + rgdppc, data = a.out$imputations$imp3,
-                     method = 'genetic')
-gen_data4 <- matchit(illicit_resources ~ total_violence + rpe_gdp +
-                         pop + polity2 + rgdppc, data = a.out$imputations$imp4,
-                     method = 'genetic')
-gen_data5 <- matchit(illicit_resources ~ total_violence + rpe_gdp +
-                         pop + polity2 + rgdppc, data = a.out$imputations$imp5,
-                     method = 'genetic')
-
-models = list(
-    `Amelia 1` = zelig(hom_rate ~ illicit_resources, 
-                       data = match.data(gen_data1), model = 'negbin', 
-                       cite = FALSE) %>% 
-        from_zelig_model(),
-    `Amelia 2` = zelig(hom_rate ~ illicit_resources, 
-                       data = match.data(gen_data2), model = 'negbin', 
-                       cite = FALSE) %>% 
-        from_zelig_model(),
-    `Amelia 3` = zelig(hom_rate ~ illicit_resources, 
-                       data = match.data(gen_data3), model = 'negbin', 
-                       cite = FALSE) %>% 
-        from_zelig_model(),
-    `Amelia 4` = zelig(hom_rate ~ illicit_resources, 
-                       data = match.data(gen_data4), model = 'negbin', 
-                       cite = FALSE) %>% 
-        from_zelig_model(),
-    `Amelia 5` = zelig(hom_rate ~ illicit_resources, 
-                       data = match.data(gen_data5), model = 'negbin', 
-                       cite = FALSE) %>% 
-        from_zelig_model()
-    
-)
-modelplot(models = models, coef_omit = 'Int') + 
-    geom_vline(xintercept = 0) +
-    labs(title = "Genetic")
+cem_p <- ggplot() +
+    geom_point(aes(x = seq_len(6), y = gens[, 1])) +
+    geom_segment(aes(x = seq_len(6), xend = seq_len(6),
+                     y = gens[, 1] - 1.96 * gens[, 2],
+                     yend = gens[, 1] + 1.96 * gens[, 2])) +
+    geom_hline(aes(yintercept = 0), linetype = 2) +
+    xlab("Amelia II Dataset #") +
+    ylab("Treatment Effect") +
+    labs(title = "Coarsened-Exact Matching")

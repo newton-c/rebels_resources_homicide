@@ -3,7 +3,8 @@ library(tidyverse)
 library(modelsummary)
 library(Zelig)
 
-load("data/data25Mar2020.Rdata")
+#load("data/data25Mar2020.Rdata")
+dat <- main_data
 dat <- dat %>%
     filter(year > last_year_conflict & !is.na(illicit_resources)) %>%
     mutate(time = year - last_year_conflict,

@@ -1,4 +1,4 @@
-library(tidverse)
+library(tidyverse)
 library(WDI)
 
 library(httr)
