@@ -1,9 +1,10 @@
 library(lmtest)
 library(MatchIt)
 library(purrr)
+library(MASS)
 library(tidyverse)
 library(sandwich)
-library(Zelig)
+#library(Zelig) # no longer maintained
 library(patchwork)
 
 theme_set(theme_bw)
@@ -24,24 +25,38 @@ match_formula <- illicit_resources ~ pop_slums + gini + corruption +
 match_algos <- list("genetic", "cem", "nearest", "optimal")
 
 matched_data <- list()
-for (k in seq_len(24)) {
-for (i in seq_along(datasets)) {
+#for (k in seq_len(24)) {
+#for (i in seq_along(datasets)) {
+counter <- 1
+for (i in seq_len(5)) {
     for (j in seq_along(match_algos)) {
+      print(paste0("Matching dataset ", i, " using the ",
+                   match_algos[[j]], " algorithm"))
     matched <- matchit(formula = match_formula, data = datasets[[i]],
                                  method = match_algos[[j]], replace = TRUE)
-        }
-    matched_data[[k]] <- matched
+    print(paste0("Dataset: ", i, " successfully matched using ",
+                 match_algos[[j]]))
+        
+    matched_data[[counter]] <- matched
+    counter <- counter + 1
+    print(counter)
     }
-}
+    #matched_data[[k]] <- matched
+    }
+#}
 
 
 # vignette("estimating-effects")
-gens <- array(NA, c(6, 2))
-for (i in seq_len(6)) {
+#gens <- array(NA, c(6, 2))
+#for (i in seq_len(6)) {
+gens <- array(NA, c(5, 2))
+for (i in seq_len(5)) {
     dat <- match.data(matched_data[[i]])
-    gen <- zelig(hom_count ~ illicit_resources, data = dat,
-                 weights = dat$weights, model = "negbin", cite = FALSE) %>%
-           from_zelig_model()
+#    gen <- zelig(hom_count ~ illicit_resources, data = dat,
+#                 weights = dat$weights, model = "negbin", cite = FALSE) %>%
+#           from_zelig_model()
+    gen <- glm.nb(hom_count ~ illicit_resources,
+                  data = dat, weights = dat$weights)
     gens[i, 1] <- coeftest(gen, vcov. = vcovHC)[[2]]
     gens[i, 2] <- coeftest(gen, vcov. = vcovHC)[[4]]
 }
