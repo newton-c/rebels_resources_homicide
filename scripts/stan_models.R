@@ -6,6 +6,7 @@ library(gridExtra)
 
 set.seed(987645)
 options(mc.cores = parallel::detectCores())
+options(scipen=999)
 
 datasets <- map(seq_len(5), function(i) {
     file_path <- paste0("data/imputed_data_", i, ".csv")
@@ -15,9 +16,9 @@ datasets <- map(seq_len(5), function(i) {
 datasets[[6]] <- read_csv("data/unimputed_data.csv") %>%
     drop_na()
 
-bm1 <- stan_glm.nb(hom_count ~ illicit_resources + pop_slums + gini +
-                   corruption + pko_troops + pko_police + total_deaths,
-                   data = datasets[[1]])
+#bm1 <- stan_glm.nb(hom_count ~ illicit_resources + pop_slums + gini +
+#                   corruption + pko_troops + pko_police + total_deaths,
+#                   data = datasets[[1]])
 
 bnbs <- array(NA, c(8, 2, 5))
 for (i in seq_len(5)) {
