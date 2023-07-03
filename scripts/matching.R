@@ -7,7 +7,8 @@ library(sandwich)
 #library(Zelig) # no longer maintained
 library(patchwork)
 
-theme_set(theme_bw)
+theme_set(theme_bw())
+set.seed(987645)
 
 datasets <- list()
 
@@ -62,32 +63,43 @@ for (i in seq_len(5)) {
 }
 
 gen_p <- ggplot() +
-    geom_point(aes(x = seq_len(6), y = gens[, 1])) +
-    geom_segment(aes(x = seq_len(6), xend = seq_len(6),
+    #geom_point(aes(x = seq_len(6), y = gens[, 1])) +
+    #geom_segment(aes(x = seq_len(6), xend = seq_len(6),
+    geom_point(aes(x = seq_len(5), y = gens[, 1])) +
+    geom_segment(aes(x = seq_len(5), xend = seq_len(5),
                      y = gens[, 1] - 1.96 * gens[, 2],
                      yend = gens[, 1] + 1.96 * gens[, 2])) +
     geom_hline(aes(yintercept = 0), linetype = 2) +
     xlab("Amelia II Dataset #") +
-    ylab("Treatment Effect") +
+    ylab("Average Treatment Effect on the Treated") +
     labs(title = "Genetic Matching")
 
-cems <- array(NA, c(6, 2))
-for (i in seq_len(6)) {
+#cems <- array(NA, c(6, 2))
+#for (i in seq_len(6)) {
+cems <- array(NA, c(5, 2))
+for (i in seq_len(5)) {
     j <- i + 5
     dat <- match.data(matched_data[[j]])
-    cem <- zelig(hom_count ~ illicit_resources, data = dat,
-                 weights = dat$weights, model = "negbin", cite = FALSE) %>%
-           from_zelig_model()
+#    cem <- zelig(hom_count ~ illicit_resources, data = dat,
+#                 weights = dat$weights, model = "negbin", cite = FALSE) %>%
+#           from_zelig_model()
+    cem <- glm.nb(hom_count ~ illicit_resources, data = dat,
+                  weights = dat$weights)
     cems[i, 1] <- coeftest(cem, vcov. = vcovHC)[[2]]
     cems[i, 2] <- coeftest(cem, vcov. = vcovHC)[[4]]
 }
 
 cem_p <- ggplot() +
-    geom_point(aes(x = seq_len(6), y = gens[, 1])) +
-    geom_segment(aes(x = seq_len(6), xend = seq_len(6),
-                     y = gens[, 1] - 1.96 * gens[, 2],
-                     yend = gens[, 1] + 1.96 * gens[, 2])) +
+    #geom_point(aes(x = seq_len(6), y = gens[, 1])) +
+    #geom_segment(aes(x = seq_len(6), xend = seq_len(6),
+  #                   y = gens[, 1] - 1.96 * gens[, 2],
+ #                    yend = gens[, 1] + 1.96 * gens[, 2])) +
+    geom_point(aes(x = seq_len(5), y = cems[, 1])) +
+    geom_segment(aes(x = seq_len(5), xend = seq_len(5),
+                     y = cems[, 1] - 1.96 * cems[, 2],
+                     yend = cems[, 1] + 1.96 * cems[, 2])) +
     geom_hline(aes(yintercept = 0), linetype = 2) +
     xlab("Amelia II Dataset #") +
-    ylab("Treatment Effect") +
+    ylab("") +
+    #ylab("Treatment Effect") +
     labs(title = "Coarsened-Exact Matching")
